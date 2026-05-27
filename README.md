@@ -2,7 +2,7 @@
 
 Bot Python otomatis (Serverless/Worker) yang bertugas mendengarkan pesan dari Telegram secara *real-time*, mengekstrak tautan lowongan kerja dari berbagai sumber website portal karir, menulis ulang (*rewrite*) kontennya menggunakan AI (Gemini Flash) agar 100% unik & ramah SEO, dan menyimpannya langsung ke database MongoDB Atlas.
 
-Bot ini dirancang khusus untuk berjalan secara mandiri 24/7 di layanan cloud (seperti Koyeb).
+Bot ini dirancang khusus untuk berjalan secara mandiri 24/7 di layanan cloud gratis selamanya seperti Render.com.
 
 ## Fitur Utama ✨
 1. **Telegram Listener:** Bereaksi instan saat ada pesan masuk di Channel Telegram yang ditentukan.
@@ -11,12 +11,12 @@ Bot ini dirancang khusus untuk berjalan secara mandiri 24/7 di layanan cloud (se
 4. **Smart MongoDB Upsert:** Menyimpan hasil akhir JSON ke MongoDB Atlas. Jika loker sudah pernah ada (berdasarkan `original_url`), bot hanya akan memperbarui data (*Update*) agar konten tidak ganda (Anti Duplicate Content).
 5. **String Session:** Menggunakan `Telethon StringSession` sehingga kebal dari proses *restart* server (cocok untuk hosting gratisan yang sering *sleep/restart*).
 
-## Deployment (Cara Pasang di Koyeb) 🚀
+## Deployment (Cara Pasang di Render.com) 🚀
 
-Koyeb adalah pilihan sempurna untuk bot ini karena menyediakan *Free Worker* yang berjalan 24 jam penuh tanpa perlu dipancing *traffic* (berbeda dengan Render).
+Render adalah pilihan tepat karena menyediakan *Web Service* gratis selamanya. Karena Render akan "menidurkan" server jika tidak ada kunjungan dalam 15 menit, bot ini sudah dilengkapi dengan **Web Server Mini Otomatis**. Anda hanya perlu menggunakan layanan *Ping* gratis seperti cron-job.org untuk menjaganya tetap hidup.
 
 ### 1. Persiapkan Environment Variables (Secrets)
-Siapkan kredensial berikut dan masukkan ke bagian **Environment Variables** di Dashboard Koyeb:
+Siapkan kredensial berikut dan masukkan ke bagian **Environment Variables** di Dashboard Render:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key
@@ -36,12 +36,19 @@ MONGODB_DB_NAME=nyarikerja_db
 MONGODB_COLLECTION_NAME=jobs
 ```
 
-### 2. Set Run Command di Koyeb
-Pada tahap *Deployment*, Anda hanya perlu menetapkan satu perintah:
-- **Build Command:** *(Kosongkan)*
-- **Run Command:** `python telegram_listener.py`
+### 2. Set Konfigurasi di Render
+Saat membuat **New Web Service** di Render:
+- **Build Command:** `pip install -r requirements.txt`
+- **Start Command:** `python telegram_listener.py`
 
-Klik Deploy, dan dalam 2-3 menit, bot Anda akan hidup di awan mencari lowongan kerja untuk Anda!
+Klik **Deploy**. Render akan memberi Anda sebuah URL gratis (misalnya `https://bot-scraper.onrender.com`).
+
+### 3. Jaga Bot Tetap Hidup (Anti-Sleep)
+Buka [cron-job.org](https://cron-job.org/) (Gratis):
+1. Buat akun dan klik **Create Cronjob**.
+2. Masukkan URL Render Anda tadi (tambahkan `/ping` di belakangnya, contoh: `https://bot-scraper.onrender.com/ping`).
+3. Set jadwalnya agar mengunjungi URL tersebut setiap **14 menit**.
+4. Selesai! Bot Anda akan hidup abadi tanpa henti.
 
 ---
 *Dibangun untuk nyarikerja.online - Mengubah kerja keras menjadi kerja cerdas.*

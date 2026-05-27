@@ -2,9 +2,11 @@ import os
 import re
 import json
 import logging
+import asyncio
 from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from aiohttp import web
 from scrape import process_job_url, save_to_mongodb
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -79,7 +81,21 @@ async def main():
                     f.write(f"TELEGRAM_STRING_SESSION={new_session_string}\n")
                 else:
                     f.write(line)
-        logger.info("String Session berhasil disimpan ke .env. Anda siap untuk deploy ke Koyeb!")
+        logger.info("String Session berhasil disimpan ke .env. Anda siap untuk deploy ke Render!")
+
+    # Memulai Dummy Web Server untuk Render
+    app = web.Application()
+    async def handle_ping(request):
+        return web.Response(text="Bot is alive and listening to Telegram!")
+    app.router.add_get('/', handle_ping)
+    app.router.add_get('/ping', handle_ping)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get('PORT', 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Web server dummy berjalan di port {port} untuk Render.com ping.")
 
     print(f"Menjalankan Telegram Listener untuk channel: {channel_username}...")
     print("Tekan Ctrl+C untuk berhenti.")
