@@ -38,6 +38,10 @@ ENV/
 # Local JSON Test Files
 result*.json
 
+# Log Files
+bot.log
+bot.log.*
+
 # Next.js / Frontend
 node_modules/
 .next/

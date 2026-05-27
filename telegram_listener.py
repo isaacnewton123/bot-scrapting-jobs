@@ -1,123 +1,191 @@
+"""
+telegram_listener.py — Telegram channel listener.
+
+Satu tanggung jawab: mendengarkan pesan di channel Telegram,
+mengekstrak URL, dan menjalankan pipeline scraping.
+
+Status page dan stats tracking di-import dari modul terpisah.
+"""
+
+from __future__ import annotations
+
 import os
 import re
-import json
-import logging
-import asyncio
-from datetime import datetime
+
+from aiohttp import web
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from aiohttp import web
-from scrape import process_job_url, save_to_mongodb
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from config import (
+    ENV_PATH,
+    TELEGRAM_API_HASH,
+    TELEGRAM_API_ID,
+    TELEGRAM_CHANNEL,
+    TELEGRAM_STRING_SESSION,
+    validate_telegram,
+)
+from logger import get_logger
+from scrape import process_job_url
+from stats import (
+    mark_started,
+    record_error,
+    record_message,
+    record_success,
+    record_url_found,
+    set_channel_name,
+)
+from status_page import build_status_html
+from storage import save_to_mongodb
+from models import JobData
 
-# Load .env file
-env_path = os.path.join(os.path.dirname(__file__), '.env')
-if os.path.exists(env_path):
-    with open(env_path) as f:
-        for line in f:
-            if line.strip() and not line.startswith('#'):
-                key, val = line.strip().split('=', 1)
-                os.environ[key.strip()] = val.strip().strip('"\'')
+logger = get_logger(__name__)
 
-api_id = os.environ.get('TELEGRAM_API_ID')
-api_hash = os.environ.get('TELEGRAM_API_HASH')
-channel_username = os.environ.get('TELEGRAM_CHANNEL', 'bukajobs') # Bisa berupa ID channel atau username
-string_session_env = os.environ.get('TELEGRAM_STRING_SESSION', '')
+# ─── Validasi ─────────────────────────────────────────────────────────────────
 
-if not api_id or not api_hash:
-    print("=======================================================================")
-    print("ERROR: TELEGRAM_API_ID dan TELEGRAM_API_HASH belum diset di file .env")
-    print("Silakan dapatkan dari https://my.telegram.org lalu tambahkan ke .env")
-    print("=======================================================================")
-    exit(1)
+validate_telegram()
 
-# Jika StringSession kosong, Telethon akan meminta nomor HP dan OTP.
-client = TelegramClient(StringSession(string_session_env), api_id, api_hash)
+# ─── Telegram Client ──────────────────────────────────────────────────────────
 
-async def my_event_handler(event):
-    message_text = event.raw_text
-    logger.info(f"Pesan baru terdeteksi dari channel {channel_username}!")
-    
+client = TelegramClient(
+    StringSession(TELEGRAM_STRING_SESSION),
+    int(TELEGRAM_API_ID),  # type: ignore[arg-type]
+    TELEGRAM_API_HASH,  # type: ignore[arg-type]
+)
+
+
+# ─── Event Handler ────────────────────────────────────────────────────────────
+
+async def on_new_message(event: events.NewMessage.Event) -> None:
+    """Handler untuk setiap pesan baru di channel target."""
+    message_text: str = event.raw_text
+    record_message()
+    logger.info(f"Pesan baru terdeteksi dari channel {TELEGRAM_CHANNEL}!")
+
     # Cari URL bukajobs.com
-    match = re.search(r'(https://bukajobs\.com/[^\s]+)', message_text)
-    if match:
-        url = match.group(1).strip()
-        logger.info(f"Ditemukan URL Bukajobs: {url}")
-        
-        try:
-            # Panggil fungsi scraper dan AI yang sudah kita buat
-            logger.info("Memulai proses ekstraksi dan AI rewriting...")
-            result = process_job_url(url)
-            
-            # Simpan hasil langsung ke MongoDB
-            logger.info("Menyimpan data ke MongoDB Atlas...")
-            success = save_to_mongodb(result)
-            
-            if success:
-                logger.info(f"BERHASIL! Data disimpan ke MongoDB.")
-            else:
-                logger.error("GAGAL menyimpan data ke MongoDB!")
-            
-        except Exception as e:
-            logger.error(f"Terjadi kesalahan saat memproses URL: {e}")
-    else:
-        logger.info("Tidak ada URL Bukajobs yang ditemukan di dalam pesan ini. Mengabaikan...")
-
-async def main():
-    await client.start() # type: ignore
-    
-    # Save the string session back to .env if it was just generated
-    if not string_session_env:
-        new_session_string = client.session.save()
-        logger.info("MENDAPATKAN STRING SESSION BARU! Menyimpan otomatis ke .env...")
-        with open(env_path, "r") as f:
-            lines = f.readlines()
-        with open(env_path, "w") as f:
-            for line in lines:
-                if line.startswith("TELEGRAM_STRING_SESSION="):
-                    f.write(f"TELEGRAM_STRING_SESSION={new_session_string}\n")
-                else:
-                    f.write(line)
-        logger.info("String Session berhasil disimpan ke .env. Anda siap untuk deploy ke Render!")
-
-    # Memulai Dummy Web Server untuk Render
-    app = web.Application()
-    async def handle_ping(request):
-        return web.Response(text="Bot is alive and listening to Telegram!")
-    app.router.add_get('/', handle_ping)
-    app.router.add_get('/ping', handle_ping)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get('PORT', 10000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web server dummy berjalan di port {port} untuk Render.com ping.")
-
-    # Parse channel target
-    channel_input = channel_username
-    if channel_input.startswith("https://t.me/"):
-        channel_input = channel_input.split("/")[-1]
-    if not channel_input.startswith("@") and not channel_input.replace("-","").isdigit():
-        channel_input = f"@{channel_input}"
-
-    try:
-        logger.info(f"Mencoba mencari channel target: {channel_input}...")
-        target_entity = await client.get_entity(channel_input)
-        logger.info(f"Berhasil menemukan channel: {target_entity.title}")
-    except Exception as e:
-        logger.error(f"GAGAL menemukan channel {channel_input}! Error: {e}")
-        logger.error("Pastikan Anda sudah JOIN channel tersebut di aplikasi Telegram Anda (di HP/PC) menggunakan nomor yang sama dengan String Session ini!")
+    match = re.search(r"(https://bukajobs\.com/[^\s]+)", message_text)
+    if not match:
+        logger.info("Tidak ada URL BukaJobs di pesan ini. Mengabaikan.")
         return
 
-    # Add handler dynamically using the resolved entity
-    client.add_event_handler(my_event_handler, events.NewMessage(chats=target_entity))
+    url: str = match.group(1).strip()
+    record_url_found()
+    logger.info(f"URL BukaJobs ditemukan: {url}")
 
-    print(f"Menjalankan Telegram Listener untuk channel: {target_entity.title} ({channel_input})...")
-    print("Tekan Ctrl+C untuk berhenti.")
+    try:
+        logger.info("Memulai pipeline: scrape → AI rewrite → upload...")
+        result: JobData = process_job_url(url)
+
+        logger.info("Menyimpan hasil ke MongoDB Atlas...")
+        success: bool = save_to_mongodb(result)
+
+        if success:
+            record_success(url, result.get("company", "—"))
+            logger.info(f"SUKSES! Loker dari {url} berhasil diproses dan disimpan.")
+        else:
+            record_error()
+            logger.error(f"GAGAL menyimpan loker dari {url} ke MongoDB.")
+
+    except Exception as e:
+        record_error()
+        logger.error(f"Error saat memproses {url}: {e}", exc_info=True)
+
+
+# ─── Channel Resolver ────────────────────────────────────────────────────────
+
+def _normalize_channel(raw: str) -> str:
+    """Normalisasi input channel ke format yang bisa di-resolve Telethon."""
+    channel = raw.strip()
+    if channel.startswith("https://t.me/"):
+        channel = channel.split("/")[-1]
+    if not channel.startswith("@") and not channel.replace("-", "").isdigit():
+        channel = f"@{channel}"
+    return channel
+
+
+# ─── Session Auto-Save ───────────────────────────────────────────────────────
+
+def _save_session_to_env(session_string: str) -> None:
+    """Simpan StringSession baru ke file .env."""
+    try:
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        found: bool = False
+        with open(ENV_PATH, "w", encoding="utf-8") as f:
+            for line in lines:
+                if line.startswith("TELEGRAM_STRING_SESSION="):
+                    f.write(f"TELEGRAM_STRING_SESSION={session_string}\n")
+                    found = True
+                else:
+                    f.write(line)
+            if not found:
+                f.write(f"\nTELEGRAM_STRING_SESSION={session_string}\n")
+
+        logger.info("String Session baru berhasil disimpan ke .env.")
+    except Exception as e:
+        logger.error(f"Gagal menyimpan session ke .env: {e}", exc_info=True)
+
+
+# ─── Web Server ──────────────────────────────────────────────────────────────
+
+async def _start_status_server() -> None:
+    """Jalankan HTTP server dengan halaman status untuk Render.com."""
+    app = web.Application()
+
+    async def handle_status(request: web.Request) -> web.Response:
+        html: str = build_status_html()
+        return web.Response(text=html, content_type="text/html")
+
+    async def handle_ping(request: web.Request) -> web.Response:
+        return web.Response(text="ok")
+
+    app.router.add_get("/", handle_status)
+    app.router.add_get("/ping", handle_ping)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port: int = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Status server berjalan di port {port}.")
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+async def main() -> None:
+    """Entry point utama: connect → resolve channel → listen."""
+    mark_started()
+    await client.start()  # type: ignore[arg-type]
+    logger.info("Berhasil terhubung ke Telegram.")
+
+    # Auto-save session jika baru pertama kali login
+    if not TELEGRAM_STRING_SESSION:
+        new_session: str = client.session.save()  # type: ignore[union-attr]
+        logger.info("Session baru terdeteksi! Menyimpan otomatis...")
+        _save_session_to_env(new_session)
+
+    # Jalankan status server
+    await _start_status_server()
+
+    # Resolve channel target
+    channel_input: str = _normalize_channel(TELEGRAM_CHANNEL)
+    try:
+        logger.info(f"Mencari channel target: {channel_input}...")
+        target_entity = await client.get_entity(channel_input)
+        set_channel_name(target_entity.title)  # type: ignore[union-attr]
+        logger.info(f"Channel ditemukan: {target_entity.title}")  # type: ignore[union-attr]
+    except Exception as e:
+        logger.error(f"GAGAL menemukan channel {channel_input}: {e}")
+        logger.error("Pastikan akun Telegram Anda sudah JOIN channel tersebut!")
+        return
+
+    # Register event handler
+    client.add_event_handler(on_new_message, events.NewMessage(chats=target_entity))
+
+    logger.info(f"Menjalankan listener untuk: {target_entity.title} ({channel_input})")  # type: ignore[union-attr]
+    logger.info("Tekan Ctrl+C untuk berhenti.")
     await client.run_until_disconnected()
 
-if __name__ == '__main__':
-    client.loop.run_until_complete(main())
+
+if __name__ == "__main__":
+    client.loop.run_until_complete(main())  # type: ignore[union-attr]

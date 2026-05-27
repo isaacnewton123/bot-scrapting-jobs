@@ -1,7 +1,6 @@
 telethon
-google-genai
-beautifulsoup4
 boto3
 pymongo
 dnspython
 aiohttp
+typing_extensions

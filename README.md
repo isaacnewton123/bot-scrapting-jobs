@@ -1,54 +1,147 @@
-# NyariKerja Auto Scraper Bot 🤖💼
+# 🤖 NyariKerja Bot
 
-Bot Python otomatis (Serverless/Worker) yang bertugas mendengarkan pesan dari Telegram secara *real-time*, mengekstrak tautan lowongan kerja dari berbagai sumber website portal karir, menulis ulang (*rewrite*) kontennya menggunakan AI (Gemini Flash) agar 100% unik & ramah SEO, dan menyimpannya langsung ke database MongoDB Atlas.
+Bot otomatis untuk scraping, rewriting, dan penyimpanan data lowongan kerja dari channel Telegram ke MongoDB Atlas.
 
-Bot ini dirancang khusus untuk berjalan secara mandiri 24/7 di layanan cloud gratis selamanya seperti Render.com.
+## ✨ Fitur Utama
 
-## Fitur Utama ✨
-1. **Telegram Listener:** Bereaksi instan saat ada pesan masuk di Channel Telegram yang ditentukan.
-2. **AI Rewriter (Google Gemini):** Menyulap deskripsi pekerjaan asli menjadi format yang lebih rapi, terstruktur, dan dioptimalkan dengan *slug*, *meta title*, *meta description*, dan *tags* untuk SEO (Rata Kanan).
-3. **Cloudflare R2 Storage:** Otomatis mengunduh gambar loker dari web asal dan mengunggahnya ke CDN Cloudflare R2 yang super cepat.
-4. **Smart MongoDB Upsert:** Menyimpan hasil akhir JSON ke MongoDB Atlas. Jika loker sudah pernah ada (berdasarkan `original_url`), bot hanya akan memperbarui data (*Update*) agar konten tidak ganda (Anti Duplicate Content).
-5. **String Session:** Menggunakan `Telethon StringSession` sehingga kebal dari proses *restart* server (cocok untuk hosting gratisan yang sering *sleep/restart*).
+- **Telegram Listener** — Mendengarkan pesan baru di channel Telegram secara real-time
+- **Auto Scraper** — Mengekstrak data lowongan dari URL yang ditemukan (judul, konten, gambar, link apply)
+- **AI Rewriting (Gemini)** — Menulis ulang deskripsi agar unik dan SEO-optimized menggunakan Gemini API
+- **Image Upload (Cloudflare R2)** — Mengunduh dan mengunggah gambar lowongan ke CDN
+- **MongoDB Atlas** — Menyimpan data terstruktur dengan sistem upsert (tidak duplikat)
+- **Status Dashboard** — Halaman web informatif untuk monitoring bot secara real-time
+- **Type-Safe** — Seluruh kode menggunakan TypedDict (tanpa `Any`) untuk keamanan tipe data
 
-## Deployment (Cara Pasang di Render.com) 🚀
+## 📁 Struktur Folder
 
-Render adalah pilihan tepat karena menyediakan *Web Service* gratis selamanya. Karena Render akan "menidurkan" server jika tidak ada kunjungan dalam 15 menit, bot ini sudah dilengkapi dengan **Web Server Mini Otomatis**. Anda hanya perlu menggunakan layanan *Ping* gratis seperti cron-job.org untuk menjaganya tetap hidup.
+```
+bot/
+├── models.py              # Type definitions (TypedDict) — 8 tipe data
+├── config.py              # Load .env, validasi, export config bertipe
+├── logger.py              # Console-only logging (stdout untuk Render)
+├── parsers.py             # HTML parser + content cleaner
+├── ai_rewriter.py         # Prompt template + Gemini API call
+├── storage.py             # Upload R2 + simpan MongoDB
+├── stats.py               # In-memory stats tracker
+├── status_page.py         # HTML status page builder
+├── scrape.py              # Pipeline utama (scrape → AI → upload → save)
+├── telegram_listener.py   # Telegram channel listener (entry point)
+├── requirements.txt       # Dependencies
+└── .env                   # Environment variables (JANGAN commit!)
+```
 
-### 1. Persiapkan Environment Variables (Secrets)
-Siapkan kredensial berikut dan masukkan ke bagian **Environment Variables** di Dashboard Render:
+## 🔧 Konfigurasi
+
+Buat file `.env` di dalam folder `bot/` dengan isi berikut:
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key
+# Telegram (wajib)
 TELEGRAM_API_ID=your_api_id
 TELEGRAM_API_HASH=your_api_hash
-TELEGRAM_CHANNEL=username_channel_telegram
-TELEGRAM_STRING_SESSION=your_long_string_session
+TELEGRAM_CHANNEL=nama_channel
+TELEGRAM_STRING_SESSION=
 
-R2_ACCOUNT_ID=your_cloudflare_account_id
-R2_ACCESS_KEY_ID=your_r2_access_key
-R2_SECRET_ACCESS_KEY=your_r2_secret_key
-R2_BUCKET_NAME=your_bucket_name
-R2_PUBLIC_DOMAIN=https://cdn.domainanda.com
+# Gemini AI (wajib)
+GEMINI_API_KEY=your_gemini_api_key
 
-MONGODB_URI=mongodb+srv://username:password@cluster...
+# Cloudflare R2 (opsional, untuk upload gambar)
+R2_ACCOUNT_ID=your_account_id
+R2_ACCESS_KEY_ID=your_access_key
+R2_SECRET_ACCESS_KEY=your_secret_key
+R2_BUCKET_NAME=your_bucket
+R2_PUBLIC_DOMAIN=https://your-domain.r2.dev
+
+# MongoDB Atlas (wajib)
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/
 MONGODB_DB_NAME=nyarikerja_db
 MONGODB_COLLECTION_NAME=jobs
 ```
 
-### 2. Set Konfigurasi di Render
-Saat membuat **New Web Service** di Render:
-- **Build Command:** `pip install -r requirements.txt`
-- **Start Command:** `python telegram_listener.py`
+### Cara Mendapatkan Credentials
 
-Klik **Deploy**. Render akan memberi Anda sebuah URL gratis (misalnya `https://bot-scraper.onrender.com`).
+| Credential | Sumber |
+|---|---|
+| `TELEGRAM_API_ID` & `TELEGRAM_API_HASH` | [my.telegram.org](https://my.telegram.org) |
+| `TELEGRAM_STRING_SESSION` | Otomatis di-generate saat pertama kali login |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) |
+| `R2_*` | [Cloudflare Dashboard → R2](https://dash.cloudflare.com) |
+| `MONGODB_URI` | [MongoDB Atlas](https://cloud.mongodb.com) |
 
-### 3. Jaga Bot Tetap Hidup (Anti-Sleep)
-Buka [cron-job.org](https://cron-job.org/) (Gratis):
-1. Buat akun dan klik **Create Cronjob**.
-2. Masukkan URL Render Anda tadi (tambahkan `/ping` di belakangnya, contoh: `https://bot-scraper.onrender.com/ping`).
-3. Set jadwalnya agar mengunjungi URL tersebut setiap **14 menit**.
-4. Selesai! Bot Anda akan hidup abadi tanpa henti.
+## 🚀 Menjalankan Lokal
 
----
-*Dibangun untuk nyarikerja.online - Mengubah kerja keras menjadi kerja cerdas.*
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Jalankan listener (akan meminta nomor HP untuk login Telegram pertama kali)
+python telegram_listener.py
+
+# 3. Atau jalankan scraper manual (tanpa Telegram)
+python scrape.py https://example.com/lowongan/
+```
+
+## 🌐 Deploy ke Render
+
+### Pengaturan Render Web Service
+
+| Setting | Value |
+|---|---|
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `python telegram_listener.py` |
+| **Environment** | `Python 3` |
+| **Plan** | Free |
+
+### Environment Variables di Render
+
+Tambahkan semua variabel dari `.env` ke **Render Dashboard → Environment**.
+
+> ⚠️ **Penting:** `TELEGRAM_STRING_SESSION` harus diisi terlebih dahulu. Jalankan bot di lokal sekali untuk men-generate session, lalu salin nilainya ke Render.
+
+### Health Check
+
+Render akan otomatis melakukan ping ke `/ping` untuk memastikan bot tetap hidup. Bot menyediakan:
+- `GET /` — Halaman status HTML dengan statistik real-time
+- `GET /ping` — Response `ok` untuk health check
+
+## 📊 Status Dashboard
+
+Saat bot berjalan, buka URL Render Anda di browser untuk melihat dashboard:
+
+- 🟢 Status bot (hidup/mati)
+- ⏱️ Uptime
+- 📈 Total berhasil / gagal / URL ditemukan
+- 📊 Success rate
+- 🏢 Perusahaan terakhir diproses
+
+> Dashboard ini **tidak menampilkan data sensitif** (API key, URI database, session).
+
+## 🔄 Alur Kerja Bot
+
+```
+Channel Telegram → Pesan Baru Terdeteksi
+       ↓
+   Cari URL lowongan di dalam pesan
+       ↓
+   Fetch HTML & Parse konten
+       ↓
+   Bersihkan dari iklan, disclaimer, social links
+       ↓
+   Kirim ke Gemini AI untuk rewriting + SEO
+       ↓
+   Upload gambar ke Cloudflare R2
+       ↓
+   Simpan ke MongoDB Atlas (upsert)
+       ↓
+   ✅ Selesai — data siap tampil di frontend
+```
+
+## 🛡️ Keamanan
+
+- File `.env` masuk `.gitignore` — tidak pernah ter-commit
+- Status page tidak menampilkan credential
+- `TELEGRAM_STRING_SESSION` bersifat rahasia — jangan bagikan ke siapapun
+- MongoDB menggunakan connection string `+srv` dengan TLS
+
+## 📝 Lisensi
+
+© 2026 NyariKerja.online — All rights reserved.
