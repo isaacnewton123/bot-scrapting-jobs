@@ -137,9 +137,10 @@ class ApplyPageParser(HTMLParser):
 
 def clean_and_structure_content(raw_content):
     jobs = []
-    current_job = None
     description = []
     metadata = {}
+    current_jobs = []
+    parsing_positions = False
     
     i = 0
     while i < len(raw_content):
@@ -168,34 +169,50 @@ def clean_and_structure_content(raw_content):
             i += 1
             continue
             
-        pos_match = re.match(r'^(?:Posisi\s*:\s*|\d+[\.\)]+\s+)(.+)$', text, re.IGNORECASE)
-        if pos_match and len(text) < 100:
-            if current_job:
-                jobs.append(current_job)
-            current_job = {"position": pos_match.group(1).strip(), "requirements": []}
+        if text.lower() in ["posisi :", "posisi:", "posisi yang dibutuhkan:", "posisi : ", "posisi", "posisi pekerjaan :", "posisi pekerjaan:"]:
+            parsing_positions = True
             i += 1
             continue
             
-        if current_job:
-            if text.strip().lower() in ["kualifikasi :", "kualifikasi:", "persyaratan:", "persyaratan :"]:
+        if parsing_positions:
+            if text.strip().lower() in ["kualifikasi :", "kualifikasi:", "persyaratan:", "persyaratan :", "kualifikasi", "persyaratan"]:
+                parsing_positions = False
                 i += 1
                 continue
             
+            if len(text) < 100 and text:
+                new_job = {"position": text, "requirements": []}
+                jobs.append(new_job)
+                current_jobs.append(new_job)
+                i += 1
+                continue
+
+        pos_match = re.match(r'^(?:Posisi\s*:\s*|\d+[\.\)]+\s+)(.+)$', text, re.IGNORECASE)
+        if pos_match and len(text) < 100:
+            new_job = {"position": pos_match.group(1).strip(), "requirements": []}
+            jobs.append(new_job)
+            current_jobs = [new_job]
+            i += 1
+            continue
+            
+        if text.strip().lower() in ["kualifikasi :", "kualifikasi:", "persyaratan:", "persyaratan :", "kualifikasi", "persyaratan"]:
+            parsing_positions = False
+            i += 1
+            continue
+            
+        if current_jobs:
             # End of job listing
-            if text.lower().startswith("apabila semua syarat") or text.lower().startswith("silakan mendaftar") or text.lower().startswith("apply here") or text.lower().startswith("pt pgas solution"):
-                jobs.append(current_job)
-                current_job = None
+            if text.lower().startswith("apabila semua syarat") or text.lower().startswith("silakan mendaftar") or text.lower().startswith("apply here") or text.lower().startswith("pt pgas solution") or text.lower().startswith("kirim lamaran"):
+                current_jobs = []
                 i += 1
                 continue
                 
-            current_job["requirements"].append(text.strip())
+            for job in current_jobs:
+                job["requirements"].append(text.strip())
         else:
             description.append(text.strip())
         
         i += 1
-            
-    if current_job:
-        jobs.append(current_job)
         
     return description, jobs, metadata
 
