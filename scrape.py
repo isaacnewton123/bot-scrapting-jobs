@@ -203,6 +203,7 @@ def rewrite_with_ai(text, company, jobs):
     api_key = os.environ.get("GEMINI_API_KEY")
     fallback = {
         "slug": company.lower().replace(' ', '-').replace('.', ''),
+        "category": "Lainnya",
         "meta_title": f"Lowongan Kerja {company}",
         "meta_description": f"Daftar lowongan kerja terbaru di {company}.",
         "tags": ["Lowongan Kerja"],
@@ -230,9 +231,11 @@ def rewrite_with_ai(text, company, jobs):
         "6. Section 5 adalah penutup dan ajakan (Call to Action) sebelum link pendaftaran.\n"
         "7. Ekstrak informasi gaji dari teks asli ke dalam array 'salaries'. Jika tidak ada info gaji, biarkan array kosong [].\n"
         "8. Buatkan 'slug' URL super SEO-friendly, 'meta_title' memancing klik (maks 60 karakter), dan 'meta_description' (maks 150 karakter). Untuk array 'tags', BERIKAN MINIMAL 10-15 TAGS populer dan sangat relevan (termasuk sinonim jabatan, nama daerah, jenis industri, tipe pekerjaan, misal: 'Loker Cikarang', 'Pabrik', 'SMA/SMK', dll) untuk menyapu bersih semua trafik pencarian.\n"
-        "9. Anda HARUS merespon dengan format JSON murni seperti ini:\n"
+        "9. Tentukan SATU 'category' utama untuk perusahaan/pekerjaan ini (misalnya: 'Manufaktur & Pabrik', 'F&B dan Restoran', 'IT & Teknologi', 'Logistik & Gudang', 'Retail', 'Kesehatan', 'Administrasi', atau buat sendiri yang relevan).\n"
+        "10. Anda HARUS merespon dengan format JSON murni seperti ini:\n"
         "{\n"
         '  "slug": "lowongan-kerja-pt-oneject-indonesia-jawa-barat",\n'
+        '  "category": "Manufaktur & Pabrik",\n'
         '  "meta_title": "Lowongan Kerja PT Oneject Indonesia Terbaru",\n'
         '  "meta_description": "...",\n'
         '  "tags": ["Manufaktur", "Alat Kesehatan"],\n'
@@ -243,7 +246,7 @@ def rewrite_with_ai(text, company, jobs):
         '  "section_4": {"header": "Judul 4", "paragraphs": ["Paragraf lanjutan"]}, \n'
         '  "section_5": {"header": "Judul 5", "paragraphs": ["Paragraf penutup"]}\n'
         "}\n"
-        "10. Gunakan teknik LSI (Latent Semantic Indexing) secara natural di seluruh paragraf. Rata kanan SEO-nya! Sikat habis semua keyword pencarian potensial tanpa terlihat seperti spam.\n\n"
+        "11. Gunakan teknik LSI (Latent Semantic Indexing) secara natural di seluruh paragraf. Rata kanan SEO-nya! Sikat habis semua keyword pencarian potensial tanpa terlihat seperti spam.\n\n"
         f"Deskripsi Asli:\n{text}"
     )
     
@@ -409,6 +412,7 @@ def process_job_url(target_url):
             "meta_description": ai_result.get("meta_description", ""),
             "tags": ai_result.get("tags", [])
         },
+        "category": ai_result.get("category", "Lainnya"),
         "section_1": ai_result.get("section_1", {"header": "", "paragraphs": []}),
         "section_2": ai_result.get("section_2", {"header": "", "paragraphs": []}),
         "salaries": ai_result.get("salaries", []),
