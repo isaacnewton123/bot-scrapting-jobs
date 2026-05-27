@@ -36,7 +36,6 @@ if not api_id or not api_hash:
 # Jika StringSession kosong, Telethon akan meminta nomor HP dan OTP.
 client = TelegramClient(StringSession(string_session_env), api_id, api_hash)
 
-@client.on(events.NewMessage(chats=channel_username))
 async def my_event_handler(event):
     message_text = event.raw_text
     logger.info(f"Pesan baru terdeteksi dari channel {channel_username}!")
@@ -97,7 +96,26 @@ async def main():
     await site.start()
     logger.info(f"Web server dummy berjalan di port {port} untuk Render.com ping.")
 
-    print(f"Menjalankan Telegram Listener untuk channel: {channel_username}...")
+    # Parse channel target
+    channel_input = channel_username
+    if channel_input.startswith("https://t.me/"):
+        channel_input = channel_input.split("/")[-1]
+    if not channel_input.startswith("@") and not channel_input.replace("-","").isdigit():
+        channel_input = f"@{channel_input}"
+
+    try:
+        logger.info(f"Mencoba mencari channel target: {channel_input}...")
+        target_entity = await client.get_entity(channel_input)
+        logger.info(f"Berhasil menemukan channel: {target_entity.title}")
+    except Exception as e:
+        logger.error(f"GAGAL menemukan channel {channel_input}! Error: {e}")
+        logger.error("Pastikan Anda sudah JOIN channel tersebut di aplikasi Telegram Anda (di HP/PC) menggunakan nomor yang sama dengan String Session ini!")
+        return
+
+    # Add handler dynamically using the resolved entity
+    client.add_event_handler(my_event_handler, events.NewMessage(chats=target_entity))
+
+    print(f"Menjalankan Telegram Listener untuk channel: {target_entity.title} ({channel_input})...")
     print("Tekan Ctrl+C untuk berhenti.")
     await client.run_until_disconnected()
 
