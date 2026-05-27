@@ -168,7 +168,7 @@ def clean_and_structure_content(raw_content):
             i += 1
             continue
             
-        pos_match = re.match(r'^(?:Posisi\s*:\s*|\d+\.\s+)(.+)$', text, re.IGNORECASE)
+        pos_match = re.match(r'^(?:Posisi\s*:\s*|\d+[\.\)]+\s+)(.+)$', text, re.IGNORECASE)
         if pos_match and len(text) < 100:
             if current_job:
                 jobs.append(current_job)
