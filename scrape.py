@@ -136,97 +136,60 @@ class ApplyPageParser(HTMLParser):
             self.current_text += data
 
 def clean_and_structure_content(raw_content):
-    jobs = []
     description = []
-    metadata = {}
-    current_jobs = []
-    parsing_positions = False
     
-    i = 0
-    while i < len(raw_content):
-        text = raw_content[i].strip()
+    skip_next = False
+    for text in raw_content:
+        text = text.strip()
+        if not text:
+            continue
+            
+        if skip_next:
+            skip_next = False
+            continue
+            
+        if text.lower() == "tanggal publikasi:":
+            skip_next = True
+            continue
+        # Stop completely if we hit the bottom of the article
+        if "post views:" in text.lower() or "posting terkait:" in text.lower() or "baca juga:" in text.lower():
+            break
+            
+        # Ignore ads, social links, and junk to save AI tokens
+        junk_keywords = [
+            "adsbygoogle", "Post Views:", "Perhatian :", "NOTE :", "Join Whatsapp", 
+            "Jika link error", "Posting terkait:", "Baca juga", "Lowongan lainnya", 
+            "Share", "Bagikan", "Follow", "Instagram", "Telegram", "Linkedin",
+            "Grup Telegram", "Grup Whatsapp", "Gabung Grup", "DISCLAIMER",
+            "Hati-hati penipuan", "Seluruh proses seleksi", "TIDAK dipungut biaya",
+            "Tidak memungut biaya", "Pelamar yang lolos", "Kirim Lamaran", "Apply here"
+        ]
+        if any(junk.lower() in text.lower() for junk in junk_keywords):
+            continue
+            
+        # Ignore very short symbol-only lines
+        if len(text) < 3 and not any(c.isalpha() for c in text):
+            continue
+            
+        description.append(text)
         
-        # Meta extraction
-        if text == "Lokasi:" and i + 1 < len(raw_content):
-            metadata["location"] = raw_content[i+1].strip()
-            i += 2
-            continue
-        if text == "Jenis Pekerjaan:" and i + 1 < len(raw_content):
-            metadata["job_type"] = raw_content[i+1].strip()
-            i += 2
-            continue
-        if text == "Pendidikan:" and i + 1 < len(raw_content):
-            metadata["education"] = raw_content[i+1].strip()
-            i += 2
-            continue
-        if text == "Tanggal publikasi:" and i + 1 < len(raw_content):
-            i += 2
-            continue
-            
-        # Ignore ads and junk
-        junk_keywords = ["adsbygoogle", "Post Views:", "Perhatian :", "NOTE :", "Join Whatsapp", "Jika link error", "Posting terkait:"]
-        if any(junk in text for junk in junk_keywords):
-            i += 1
-            continue
-            
-        if text.lower() in ["posisi :", "posisi:", "posisi yang dibutuhkan:", "posisi : ", "posisi", "posisi pekerjaan :", "posisi pekerjaan:"]:
-            parsing_positions = True
-            i += 1
-            continue
-            
-        if parsing_positions:
-            if text.strip().lower() in ["kualifikasi :", "kualifikasi:", "persyaratan:", "persyaratan :", "kualifikasi", "persyaratan"]:
-                parsing_positions = False
-                i += 1
-                continue
-            
-            if len(text) < 100 and text:
-                new_job = {"position": text, "requirements": []}
-                jobs.append(new_job)
-                current_jobs.append(new_job)
-                i += 1
-                continue
+    return description
 
-        pos_match = re.match(r'^(?:Posisi\s*:\s*|\d+[\.\)]+\s+)(.+)$', text, re.IGNORECASE)
-        if pos_match and len(text) < 100:
-            new_job = {"position": pos_match.group(1).strip(), "requirements": []}
-            jobs.append(new_job)
-            current_jobs = [new_job]
-            i += 1
-            continue
-            
-        if text.strip().lower() in ["kualifikasi :", "kualifikasi:", "persyaratan:", "persyaratan :", "kualifikasi", "persyaratan"]:
-            parsing_positions = False
-            i += 1
-            continue
-            
-        if current_jobs:
-            # End of job listing
-            if text.lower().startswith("apabila semua syarat") or text.lower().startswith("silakan mendaftar") or text.lower().startswith("apply here") or text.lower().startswith("pt pgas solution") or text.lower().startswith("kirim lamaran"):
-                current_jobs = []
-                i += 1
-                continue
-                
-            for job in current_jobs:
-                job["requirements"].append(text.strip())
-        else:
-            description.append(text.strip())
-        
-        i += 1
-        
-    return description, jobs, metadata
-
-def rewrite_with_ai(text, company, jobs):
+def rewrite_with_ai(text, company):
     api_key = os.environ.get("GEMINI_API_KEY")
     fallback = {
         "slug": company.lower().replace(' ', '-').replace('.', ''),
         "category": "Lainnya",
+        "location": "",
+        "job_type": "",
+        "education": "",
         "meta_title": f"Lowongan Kerja {company}",
         "meta_description": f"Daftar lowongan kerja terbaru di {company}.",
         "tags": ["Lowongan Kerja"],
         "section_1": {"header": "", "paragraphs": [p.strip() for p in text.split('\n') if p.strip()]},
         "section_2": {"header": "", "paragraphs": []},
         "salaries": [],
+        "jobs": [],
         "section_3": {"header": "", "paragraphs": []},
         "section_4": {"header": "", "paragraphs": []},
         "section_5": {"header": "", "paragraphs": []}
@@ -234,25 +197,28 @@ def rewrite_with_ai(text, company, jobs):
     if not api_key:
         return fallback
     
-    positions = ", ".join([job["position"] for job in jobs]) if jobs else "Lowongan Kerja"
-
     prompt = (
         "Tulis ulang deskripsi lowongan pekerjaan ini agar unik, tidak terlihat duplikat, dan SANGAT OPTIMAL UNTUK SEO. "
         "Gunakan bahasa Indonesia yang profesional dan informatif.\n\n"
         "ATURAN PENTING:\n"
-        f"1. Sisipkan kata kunci (keyword) berikut secara natural: 'Lowongan kerja', 'Loker', 'Karir', '{company}', '{positions}'.\n"
+        f"1. Sisipkan kata kunci (keyword) berikut secara natural: 'Lowongan kerja', 'Loker', 'Karir', '{company}'.\n"
         "2. Buatlah ke dalam 5 Section (section_1 sampai section_5) tanpa ada Markdown Markdown Markdown sedikit pun. Semua isi teks harus murni text JSON yang valid. Jangan gunakan raw markdown (seperti ```json).\n"
         "3. Tulis setiap section secara panjang, mendetail, dan sangat informatif (minimal 2 paragraf per section) menggunakan gaya bahasa storytelling atau copywriting yang profesional untuk memaksimalkan kata kunci SEO.\n"
         "4. Jangan gunakan format list (1,2,3) atau bullet points di dalam paragraf. Tulis murni dalam bentuk prosa/artikel naratif.\n"
         "5. Section 1 dan 2 ditempatkan SEBELUM tabel Gaji. Pastikan akhir paragraf Section 2 mengarahkan pembaca untuk melihat tabel gaji. Section 3 dan 4 ditempatkan SETELAH tabel Gaji dan SEBELUM daftar Posisi & Kualifikasi. Pastikan akhir paragraf Section 4 mengarahkan pembaca untuk melihat posisi pekerjaan dan kualifikasi yang ada di bawahnya.\n"
         "6. Section 5 adalah penutup dan ajakan (Call to Action) sebelum link pendaftaran.\n"
         "7. Ekstrak informasi gaji dari teks asli ke dalam array 'salaries'. Jika tidak ada info gaji, biarkan array kosong [].\n"
-        "8. Buatkan 'slug' URL super SEO-friendly, 'meta_title' memancing klik (maks 60 karakter), dan 'meta_description' (maks 150 karakter). Untuk array 'tags', BERIKAN MINIMAL 10-15 TAGS populer dan sangat relevan (termasuk sinonim jabatan, nama daerah, jenis industri, tipe pekerjaan, misal: 'Loker Cikarang', 'Pabrik', 'SMA/SMK', dll) untuk menyapu bersih semua trafik pencarian.\n"
-        "9. Tentukan SATU 'category' utama untuk perusahaan/pekerjaan ini (misalnya: 'Manufaktur & Pabrik', 'F&B dan Restoran', 'IT & Teknologi', 'Logistik & Gudang', 'Retail', 'Kesehatan', 'Administrasi', atau buat sendiri yang relevan).\n"
-        "10. Anda HARUS merespon dengan format JSON murni seperti ini:\n"
+        "8. EKSTRAK SEMUA POSISI LOWONGAN KERJA beserta kualifikasi/persyaratannya ke dalam array 'jobs'. Bentuknya [{ 'position': 'Nama Jabatan', 'requirements': ['Syarat 1', 'Syarat 2'] }]. AI harus cukup pintar membedakan mana teks deskripsi dan mana daftar kualifikasi posisi. JIKA ADA BANYAK POSISI namun kualifikasinya ditulis menjadi satu di bagian bawah, pasangkan kualifikasi tersebut ke semua posisi yang relevan!\n"
+        "9. EKSTRAK METADATA LOKASI, TIPE PEKERJAAN, DAN PENDIDIKAN TERAKHIR (location, job_type, education). Jika tidak ada di teks, biarkan string kosong \"\".\n"
+        "10. Buatkan 'slug' URL super SEO-friendly, 'meta_title' memancing klik (maks 60 karakter), dan 'meta_description' (maks 150 karakter). Untuk array 'tags', BERIKAN MINIMAL 10-15 TAGS populer dan sangat relevan (termasuk sinonim jabatan, nama daerah, jenis industri, tipe pekerjaan, misal: 'Loker Cikarang', 'Pabrik', 'SMA/SMK', dll) untuk menyapu bersih semua trafik pencarian.\n"
+        "11. Tentukan SATU 'category' utama untuk perusahaan/pekerjaan ini (misalnya: 'Manufaktur & Pabrik', 'F&B dan Restoran', 'IT & Teknologi', 'Logistik & Gudang', 'Retail', 'Kesehatan', 'Administrasi', atau buat sendiri yang relevan).\n"
+        "12. Anda HARUS merespon dengan format JSON murni seperti ini:\n"
         "{\n"
         '  "slug": "lowongan-kerja-pt-oneject-indonesia-jawa-barat",\n'
         '  "category": "Manufaktur & Pabrik",\n'
+        '  "location": "Jawa Barat",\n'
+        '  "job_type": "Full-Time",\n'
+        '  "education": "SMK/SMA/S1",\n'
         '  "meta_title": "Lowongan Kerja PT Oneject Indonesia Terbaru",\n'
         '  "meta_description": "...",\n'
         '  "tags": ["Manufaktur", "Alat Kesehatan"],\n'
@@ -261,9 +227,10 @@ def rewrite_with_ai(text, company, jobs):
         '  "salaries": [{"position": "nama posisi", "salary": "nominal/rentang gaji"}],\n'
         '  "section_3": {"header": "Judul 3", "paragraphs": ["Paragraf lanjutan"]}, \n'
         '  "section_4": {"header": "Judul 4", "paragraphs": ["Paragraf lanjutan"]}, \n'
+        '  "jobs": [{"position": "Staff Produksi", "requirements": ["Syarat 1", "Syarat 2"]}],\n'
         '  "section_5": {"header": "Judul 5", "paragraphs": ["Paragraf penutup"]}\n'
         "}\n"
-        "11. Gunakan teknik LSI (Latent Semantic Indexing) secara natural di seluruh paragraf. Rata kanan SEO-nya! Sikat habis semua keyword pencarian potensial tanpa terlihat seperti spam.\n\n"
+        "13. Gunakan teknik LSI (Latent Semantic Indexing) secara natural di seluruh paragraf. Rata kanan SEO-nya! Sikat habis semua keyword pencarian potensial tanpa terlihat seperti spam.\n\n"
         f"Deskripsi Asli:\n{text}"
     )
     
@@ -400,11 +367,11 @@ def process_job_url(target_url):
     if parser.current_content.strip():
         parser.content.append(parser.current_content.strip())
 
-    desc, jobs, metadata = clean_and_structure_content(parser.content)
+    desc = clean_and_structure_content(parser.content)
     title_clean = parser.title.replace(" - Bukajobs Media", "").strip()
 
     original_desc_text = "\n".join(desc)
-    ai_result = rewrite_with_ai(original_desc_text, title_clean, jobs)
+    ai_result = rewrite_with_ai(original_desc_text, title_clean)
 
     slug = ai_result.get("slug", title_clean.lower().replace(' ', '-').replace('.', ''))
     
@@ -421,9 +388,9 @@ def process_job_url(target_url):
         "company": title_clean,
         "slug": slug,
         "image_url": image_url,
-        "location": metadata.get("location", ""),
-        "job_type": metadata.get("job_type", ""),
-        "education": metadata.get("education", ""),
+        "location": ai_result.get("location", ""),
+        "job_type": ai_result.get("job_type", ""),
+        "education": ai_result.get("education", ""),
         "seo": {
             "meta_title": ai_result.get("meta_title", ""),
             "meta_description": ai_result.get("meta_description", ""),
@@ -435,7 +402,7 @@ def process_job_url(target_url):
         "salaries": ai_result.get("salaries", []),
         "section_3": ai_result.get("section_3", {"header": "", "paragraphs": []}),
         "section_4": ai_result.get("section_4", {"header": "", "paragraphs": []}),
-        "jobs": jobs,
+        "jobs": ai_result.get("jobs", []),
         "section_5": ai_result.get("section_5", {"header": "", "paragraphs": []}),
         "apply_links": []
     }
