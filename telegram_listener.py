@@ -37,8 +37,13 @@ from stats import (
 from status_page import build_status_html
 from storage import save_to_mongodb
 from models import JobData
+import time
 
 logger = get_logger(__name__)
+
+# Cache untuk mencegah duplikasi jika pesan di-edit berulang-ulang
+# Format: { "url": timestamp_terakhir_diproses }
+PROCESSED_URLS: dict[str, float] = {}
 
 # ─── Validasi ─────────────────────────────────────────────────────────────────
 
@@ -57,9 +62,13 @@ client = TelegramClient(
 
 async def on_new_message(event: events.NewMessage.Event) -> None:
     """Handler untuk setiap pesan baru di channel target."""
-    message_text: str = event.raw_text
+    message_text: str = event.raw_text or event.text or ""
     record_message()
     logger.info(f"Pesan baru terdeteksi dari channel {TELEGRAM_CHANNEL}!")
+    
+    # Debug isi pesan (potong jika terlalu panjang agar tidak spam)
+    snippet = message_text[:200].replace('\n', ' ')
+    logger.info(f"Isi pesan (raw): {snippet}...")
 
     # Cari URL bukajobs.com
     match = re.search(r"(https://bukajobs\.com/[^\s]+)", message_text)
@@ -68,6 +77,21 @@ async def on_new_message(event: events.NewMessage.Event) -> None:
         return
 
     url: str = match.group(1).strip()
+    current_time = time.time()
+    
+    # Jika URL pernah diproses dalam 1 jam (3600 detik) terakhir, abaikan (mencegah spam edit)
+    if url in PROCESSED_URLS and (current_time - PROCESSED_URLS[url]) < 3600:
+        logger.info(f"URL sudah diproses baru-baru ini (< 1 jam): {url}. Mengabaikan.")
+        return
+        
+    # Catat waktu pemrosesan URL ini
+    PROCESSED_URLS[url] = current_time
+    
+    # Bersihkan cache URL yang sudah lewat dari 1 jam agar memori tidak bengkak
+    keys_to_delete = [k for k, v in PROCESSED_URLS.items() if (current_time - v) >= 3600]
+    for k in keys_to_delete:
+        del PROCESSED_URLS[k]
+
     record_url_found()
     logger.info(f"URL BukaJobs ditemukan: {url}")
 
@@ -181,6 +205,7 @@ async def main() -> None:
 
     # Register event handler
     client.add_event_handler(on_new_message, events.NewMessage(chats=target_entity))
+    client.add_event_handler(on_new_message, events.MessageEdited(chats=target_entity))
 
     logger.info(f"Menjalankan listener untuk: {target_entity.title} ({channel_input})")  # type: ignore[union-attr]
     logger.info("Tekan Ctrl+C untuk berhenti.")
